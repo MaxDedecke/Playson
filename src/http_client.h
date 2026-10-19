@@ -1,5 +1,12 @@
 #pragma once
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <windows.h>
 #include <winhttp.h>
 #include <vector>
@@ -45,7 +52,7 @@ public:
                                                    L"/api/upload",
                                                    NULL,
                                                    WINHTTP_NO_REFERRER,
-                                                   WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                                   WINHTTP_NO_ACCEPT_TYPES,
                                                    0);
             if (!hRequest) {
                 WinHttpCloseHandle(hConnect);

@@ -1,3 +1,10 @@
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <clap/clap.h>
 #include <clap/ext/gui.h>
 #include <clap/ext/audio-ports.h>
@@ -8,13 +15,19 @@
 #include <memory>
 #include <cmath>
 #include <cstring>
-#include <iostream>
+#include <algorithm>
 
 #include "wav_encoder.h"
 #include "http_client.h"
 #include "ui_win32.h"
 
 namespace playson {
+
+static const char* s_plugin_features[] = {
+    CLAP_PLUGIN_FEATURE_UTILITY,
+    CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
+    nullptr
+};
 
 static const clap_plugin_descriptor_t s_descriptor = {
     CLAP_VERSION_INIT,
@@ -26,11 +39,7 @@ static const clap_plugin_descriptor_t s_descriptor = {
     "",
     "1.0.0",
     "Instant 1-Click Loop Bounce from Master Bus to Sonos Speakers",
-    (const char*[]) {
-        CLAP_PLUGIN_FEATURE_UTILITY,
-        CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
-        NULL
-    }
+    s_plugin_features
 };
 
 class PlaysonPlugin {
@@ -76,6 +85,11 @@ public:
         const uint32_t numFrames = process->frames_count;
         if (numFrames == 0) return CLAP_PROCESS_CONTINUE;
 
+        if (process->audio_inputs_count == 0 || !process->audio_inputs ||
+            process->audio_outputs_count == 0 || !process->audio_outputs) {
+            return CLAP_PROCESS_CONTINUE;
+        }
+
         const float* inL = process->audio_inputs[0].data32[0];
         const float* inR = (process->audio_inputs[0].channel_count > 1) 
                            ? process->audio_inputs[0].data32[1] 
@@ -87,8 +101,12 @@ public:
                           : outL;
 
         // 1. Transparent Passthrough (0 latency on master)
-        std::memcpy(outL, inL, numFrames * sizeof(float));
-        std::memcpy(outR, inR, numFrames * sizeof(float));
+        if (outL != inL) {
+            std::memcpy(outL, inL, numFrames * sizeof(float));
+        }
+        if (outR != inR) {
+            std::memcpy(outR, inR, numFrames * sizeof(float));
+        }
 
         // 2. Transport inspection
         bool isPlaying = false;
@@ -117,9 +135,8 @@ public:
 
         // 3. State Machine
         if (m_state == PluginState::WAITING_FOR_LOOP_START) {
-            // If waiting for play or loop start
             if (isPlaying) {
-                if (!hasLoop || currentBeat <= (loopStartBeat + 0.1)) {
+                if (!hasLoop || currentBeat <= (loopStartBeat + 0.15)) {
                     m_bufferL.clear();
                     m_bufferR.clear();
                     m_recording = true;
@@ -149,7 +166,6 @@ public:
             if (hasLoop && currentBeat >= (loopEndBeat - 0.05) && recordedSec > 1.0f) {
                 loopFinished = true;
             } else if (!isPlaying && recordedSec > 1.0f) {
-                // FL Studio stopped playback
                 loopFinished = true;
             } else if (recordedSec >= 90.0f) {
                 loopFinished = true;
@@ -165,7 +181,6 @@ public:
 
     void triggerBounce() {
         if (m_state == PluginState::RECORDING) {
-            // Manual stop and upload
             finishAndUpload();
             return;
         }
@@ -193,19 +208,15 @@ public:
             return;
         }
 
-        // Encode WAV on current thread or worker
         std::vector<float> copyL = m_bufferL;
         std::vector<float> copyR = m_bufferR;
         uint32_t sRate = m_sampleRate;
 
-        // Reset buffers
         m_bufferL.clear();
         m_bufferR.clear();
 
-        // Encode to 16-bit stereo WAV in memory
         std::vector<uint8_t> wavData = WavEncoder::encode16BitStereo(copyL, copyR, sRate);
 
-        // Upload async via WinHTTP
         HttpClient::sendWavAsync(wavData, "FL_Studio_Snapshot.wav", m_connectorPort, [this](bool success, std::string msg) {
             if (success) {
                 m_state = PluginState::SUCCESS;
@@ -221,7 +232,6 @@ public:
         });
     }
 
-    // GUI Extension
     bool guiCreate(const char* api, bool isFloating) {
         if (std::strcmp(api, CLAP_WINDOW_API_WIN32) != 0) return false;
         m_gui = std::make_unique<Win32Gui>();
@@ -283,52 +293,52 @@ private:
 // CLAP C Interface Glue Code
 // -------------------------------------------------------------
 
-static bool clap_init_cb(const struct clap_plugin* plugin) {
+static bool CLAP_ABI clap_init_cb(const struct clap_plugin* plugin) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     return self->init();
 }
 
-static void clap_destroy_cb(const struct clap_plugin* plugin) {
+static void CLAP_ABI clap_destroy_cb(const struct clap_plugin* plugin) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     delete self;
 }
 
-static bool clap_activate_cb(const struct clap_plugin* plugin, double sample_rate, uint32_t min_frames, uint32_t max_frames) {
+static bool CLAP_ABI clap_activate_cb(const struct clap_plugin* plugin, double sample_rate, uint32_t min_frames, uint32_t max_frames) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     return self->activate(sample_rate, min_frames, max_frames);
 }
 
-static void clap_deactivate_cb(const struct clap_plugin* plugin) {
+static void CLAP_ABI clap_deactivate_cb(const struct clap_plugin* plugin) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     self->deactivate();
 }
 
-static bool clap_start_processing_cb(const struct clap_plugin* plugin) {
+static bool CLAP_ABI clap_start_processing_cb(const struct clap_plugin* plugin) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     return self->startProcessing();
 }
 
-static void clap_stop_processing_cb(const struct clap_plugin* plugin) {
+static void CLAP_ABI clap_stop_processing_cb(const struct clap_plugin* plugin) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     self->stopProcessing();
 }
 
-static void clap_reset_cb(const struct clap_plugin* plugin) {
+static void CLAP_ABI clap_reset_cb(const struct clap_plugin* plugin) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     self->reset();
 }
 
-static clap_process_status clap_process_cb(const struct clap_plugin* plugin, const clap_process_t* process) {
+static clap_process_status CLAP_ABI clap_process_cb(const struct clap_plugin* plugin, const clap_process_t* process) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     return self->process(process);
 }
 
 // Audio Ports Extension
-static uint32_t clap_audio_ports_count_cb(const clap_plugin_t* plugin, bool is_input) {
+static uint32_t CLAP_ABI clap_audio_ports_count_cb(const clap_plugin_t* plugin, bool is_input) {
     return 1;
 }
 
-static bool clap_audio_ports_get_cb(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_audio_port_info_t* info) {
+static bool CLAP_ABI clap_audio_ports_get_cb(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_audio_port_info_t* info) {
     if (index > 0) return false;
     info->id = 0;
     std::strncpy(info->name, is_input ? "Master In" : "Master Out", sizeof(info->name));
@@ -345,69 +355,69 @@ static const clap_plugin_audio_ports_t s_audio_ports = {
 };
 
 // GUI Extension
-static bool clap_gui_is_api_supported_cb(const clap_plugin_t* plugin, const char* api, bool is_floating) {
+static bool CLAP_ABI clap_gui_is_api_supported_cb(const clap_plugin_t* plugin, const char* api, bool is_floating) {
     return std::strcmp(api, CLAP_WINDOW_API_WIN32) == 0;
 }
 
-static bool clap_gui_get_preferred_api_cb(const clap_plugin_t* plugin, const char** api, bool* is_floating) {
+static bool CLAP_ABI clap_gui_get_preferred_api_cb(const clap_plugin_t* plugin, const char** api, bool* is_floating) {
     *api = CLAP_WINDOW_API_WIN32;
     *is_floating = false;
     return true;
 }
 
-static bool clap_gui_create_cb(const clap_plugin_t* plugin, const char* api, bool is_floating) {
+static bool CLAP_ABI clap_gui_create_cb(const clap_plugin_t* plugin, const char* api, bool is_floating) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     return self->guiCreate(api, is_floating);
 }
 
-static void clap_gui_destroy_cb(const clap_plugin_t* plugin) {
+static void CLAP_ABI clap_gui_destroy_cb(const clap_plugin_t* plugin) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     self->guiDestroy();
 }
 
-static bool clap_gui_set_scale_cb(const clap_plugin_t* plugin, double scale) {
+static bool CLAP_ABI clap_gui_set_scale_cb(const clap_plugin_t* plugin, double scale) {
     return false;
 }
 
-static bool clap_gui_get_size_cb(const clap_plugin_t* plugin, uint32_t* width, uint32_t* height) {
+static bool CLAP_ABI clap_gui_get_size_cb(const clap_plugin_t* plugin, uint32_t* width, uint32_t* height) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     return self->guiGetSize(width, height);
 }
 
-static bool clap_gui_can_resize_cb(const clap_plugin_t* plugin) {
+static bool CLAP_ABI clap_gui_can_resize_cb(const clap_plugin_t* plugin) {
     return false;
 }
 
-static bool clap_gui_get_resize_hints_cb(const clap_plugin_t* plugin, clap_gui_resize_hints_t* hints) {
+static bool CLAP_ABI clap_gui_get_resize_hints_cb(const clap_plugin_t* plugin, clap_gui_resize_hints_t* hints) {
     return false;
 }
 
-static bool clap_gui_adjust_size_cb(const clap_plugin_t* plugin, uint32_t* width, uint32_t* height) {
+static bool CLAP_ABI clap_gui_adjust_size_cb(const clap_plugin_t* plugin, uint32_t* width, uint32_t* height) {
     return true;
 }
 
-static bool clap_gui_set_size_cb(const clap_plugin_t* plugin, uint32_t width, uint32_t height) {
+static bool CLAP_ABI clap_gui_set_size_cb(const clap_plugin_t* plugin, uint32_t width, uint32_t height) {
     return false;
 }
 
-static bool clap_gui_set_parent_cb(const clap_plugin_t* plugin, const clap_window_t* window) {
+static bool CLAP_ABI clap_gui_set_parent_cb(const clap_plugin_t* plugin, const clap_window_t* window) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     return self->guiSetParent(window);
 }
 
-static bool clap_gui_set_transient_cb(const clap_plugin_t* plugin, const clap_window_t* window) {
+static bool CLAP_ABI clap_gui_set_transient_cb(const clap_plugin_t* plugin, const clap_window_t* window) {
     return false;
 }
 
-static void clap_gui_suggest_title_cb(const clap_plugin_t* plugin, const char* title) {
+static void CLAP_ABI clap_gui_suggest_title_cb(const clap_plugin_t* plugin, const char* title) {
 }
 
-static bool clap_gui_show_cb(const clap_plugin_t* plugin) {
+static bool CLAP_ABI clap_gui_show_cb(const clap_plugin_t* plugin) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     return self->guiSetVisible(true);
 }
 
-static bool clap_gui_hide_cb(const clap_plugin_t* plugin) {
+static bool CLAP_ABI clap_gui_hide_cb(const clap_plugin_t* plugin) {
     auto* self = (PlaysonPlugin*)plugin->plugin_data;
     return self->guiSetVisible(false);
 }
@@ -431,13 +441,13 @@ static const clap_plugin_gui_t s_plugin_gui = {
 };
 
 // Extension query
-static const void* clap_get_extension_cb(const struct clap_plugin* plugin, const char* id) {
+static const void* CLAP_ABI clap_get_extension_cb(const struct clap_plugin* plugin, const char* id) {
     if (std::strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_audio_ports;
     if (std::strcmp(id, CLAP_EXT_GUI) == 0) return &s_plugin_gui;
     return nullptr;
 }
 
-static void clap_on_main_thread_cb(const struct clap_plugin* plugin) {
+static void CLAP_ABI clap_on_main_thread_cb(const struct clap_plugin* plugin) {
 }
 
 const clap_plugin_t* PlaysonPlugin::createPlugin(const clap_host_t* host) {
@@ -461,16 +471,16 @@ const clap_plugin_t* PlaysonPlugin::createPlugin(const clap_host_t* host) {
 // Factory & Entry Point
 // -------------------------------------------------------------
 
-static uint32_t clap_factory_get_plugin_count(const struct clap_plugin_factory* factory) {
+static uint32_t CLAP_ABI clap_factory_get_plugin_count(const struct clap_plugin_factory* factory) {
     return 1;
 }
 
-static const clap_plugin_descriptor_t* clap_factory_get_plugin_descriptor(const struct clap_plugin_factory* factory, uint32_t index) {
+static const clap_plugin_descriptor_t* CLAP_ABI clap_factory_get_plugin_descriptor(const struct clap_plugin_factory* factory, uint32_t index) {
     if (index == 0) return &s_descriptor;
     return nullptr;
 }
 
-static const clap_plugin_t* clap_factory_create_plugin(const struct clap_plugin_factory* factory, const clap_host_t* host, const char* plugin_id) {
+static const clap_plugin_t* CLAP_ABI clap_factory_create_plugin(const struct clap_plugin_factory* factory, const clap_host_t* host, const char* plugin_id) {
     if (std::strcmp(plugin_id, s_descriptor.id) == 0) {
         return PlaysonPlugin::createPlugin(host);
     }
@@ -483,14 +493,14 @@ static const clap_plugin_factory_t s_factory = {
     clap_factory_create_plugin
 };
 
-static bool clap_entry_init(const char* plugin_path) {
+static bool CLAP_ABI clap_entry_init(const char* plugin_path) {
     return true;
 }
 
-static void clap_entry_deinit(void) {
+static void CLAP_ABI clap_entry_deinit(void) {
 }
 
-static const void* clap_entry_get_factory(const char* factory_id) {
+static const void* CLAP_ABI clap_entry_get_factory(const char* factory_id) {
     if (std::strcmp(factory_id, CLAP_PLUGIN_FACTORY_ID) == 0) {
         return &s_factory;
     }
@@ -499,9 +509,11 @@ static const void* clap_entry_get_factory(const char* factory_id) {
 
 } // namespace playson
 
+extern "C" {
 CLAP_EXPORT const clap_plugin_entry_t clap_entry = {
     CLAP_VERSION_INIT,
     playson::clap_entry_init,
     playson::clap_entry_deinit,
     playson::clap_entry_get_factory
 };
+}
