@@ -105,70 +105,26 @@ public:
             std::memcpy(outR, inR, numFrames * sizeof(float));
         }
 
-        // 2. Transport inspection
-        bool isPlaying = false;
-        double currentBeat = 0.0;
-        double loopStartBeat = 0.0;
-        double loopEndBeat = 0.0;
-        bool hasLoop = false;
-
-        if (process->transport) {
-            const clap_event_transport_t* t = process->transport;
-            if (t->flags & CLAP_TRANSPORT_IS_PLAYING) {
-                isPlaying = true;
-            }
-            if (t->flags & CLAP_TRANSPORT_HAS_TEMPO) {
-                m_tempo = t->tempo;
-            }
-            if (t->flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
-                currentBeat = (double)t->song_pos_beats / (double)CLAP_BEATTIME_FACTOR;
-            }
-            if (t->flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) {
-                hasLoop = true;
-                loopStartBeat = (double)t->loop_start_beats / (double)CLAP_BEATTIME_FACTOR;
-                loopEndBeat = (double)t->loop_end_beats / (double)CLAP_BEATTIME_FACTOR;
-            }
+        // 2. Transport tempo inspection
+        if (process->transport && (process->transport->flags & CLAP_TRANSPORT_HAS_TEMPO)) {
+            m_tempo = process->transport->tempo;
         }
 
-        // 3. State Machine
-        if (m_state == PluginState::WAITING_FOR_LOOP_START) {
-            if (isPlaying) {
-                if (!hasLoop || currentBeat <= (loopStartBeat + 0.15)) {
-                    m_bufferL.clear();
-                    m_bufferR.clear();
-                    m_recording = true;
-                    m_state = PluginState::RECORDING;
-                    m_recordStartBeat = currentBeat;
-                    if (m_gui) {
-                        m_gui->setStatus(PluginState::RECORDING, "Aufnahme laeuft...");
-                    }
-                }
-            }
-        }
-
+        // 3. Audio Recording
         if (m_recording) {
-            // Append samples to buffer
             for (uint32_t i = 0; i < numFrames; ++i) {
                 m_bufferL.push_back(inL[i]);
                 m_bufferR.push_back(inR[i]);
             }
 
             float recordedSec = static_cast<float>(m_bufferL.size()) / static_cast<float>(m_sampleRate);
+            float progress = (m_targetSeconds > 0.0f) ? (recordedSec / m_targetSeconds) : 0.0f;
+
             if (m_gui) {
-                m_gui->setRecordedSeconds(recordedSec);
+                m_gui->setProgress(progress, recordedSec, m_targetSeconds);
             }
 
-            // Check if loop has ended (or safety timeout of 90 seconds)
-            bool loopFinished = false;
-            if (hasLoop && currentBeat >= (loopEndBeat - 0.05) && recordedSec > 1.0f) {
-                loopFinished = true;
-            } else if (!isPlaying && recordedSec > 1.0f) {
-                loopFinished = true;
-            } else if (recordedSec >= 90.0f) {
-                loopFinished = true;
-            }
-
-            if (loopFinished) {
+            if (recordedSec >= m_targetSeconds) {
                 finishAndUpload();
             }
         }
@@ -182,11 +138,28 @@ public:
             return;
         }
 
+        // Calculate target duration
+        double tempo = (m_tempo > 20.0) ? m_tempo : 120.0;
+        double secPerBeat = 60.0 / tempo;
+
+        if (m_captureMode == CaptureMode::BARS_4) {
+            m_targetSeconds = static_cast<float>(16.0 * secPerBeat);
+        } else if (m_captureMode == CaptureMode::BARS_8) {
+            m_targetSeconds = static_cast<float>(32.0 * secPerBeat);
+        } else if (m_captureMode == CaptureMode::BARS_16) {
+            m_targetSeconds = static_cast<float>(64.0 * secPerBeat);
+        } else if (m_captureMode == CaptureMode::TIME_30S) {
+            m_targetSeconds = 30.0f;
+        }
+
         m_bufferL.clear();
         m_bufferR.clear();
-        m_state = PluginState::WAITING_FOR_LOOP_START;
+        m_recording = true;
+        m_state = PluginState::RECORDING;
+
         if (m_gui) {
-            m_gui->setStatus(PluginState::WAITING_FOR_LOOP_START, "Warte auf Play...");
+            m_gui->setStatus(PluginState::RECORDING, "Aufnahme laeuft...");
+            m_gui->setProgress(0.0f, 0.0f, m_targetSeconds);
         }
     }
 
@@ -194,7 +167,7 @@ public:
         m_recording = false;
         m_state = PluginState::UPLOADING;
         if (m_gui) {
-            m_gui->setStatus(PluginState::UPLOADING, "Sende an Sonos Speaker...");
+            m_gui->setStatus(PluginState::UPLOADING, "Sende Snapshot an Sonos Play:1...");
         }
 
         if (m_bufferL.empty()) {
@@ -218,7 +191,7 @@ public:
             if (success) {
                 m_state = PluginState::SUCCESS;
                 if (m_gui) {
-                    m_gui->setStatus(PluginState::SUCCESS, "Erfolgreich auf Sonos abgespielt!");
+                    m_gui->setStatus(PluginState::SUCCESS, "Wird jetzt auf Sonos Lautsprecher abgespielt!");
                 }
             } else {
                 m_state = PluginState::IDLE;
@@ -232,8 +205,12 @@ public:
     bool guiCreate(const char* api, bool isFloating) {
         if (std::strcmp(api, CLAP_WINDOW_API_WIN32) != 0) return false;
         m_gui = std::make_unique<Win32Gui>();
+        m_gui->setMode(m_captureMode);
         m_gui->onTriggerBounce = [this]() {
             this->triggerBounce();
+        };
+        m_gui->onModeChanged = [this](CaptureMode mode) {
+            this->m_captureMode = mode;
         };
         return true;
     }
@@ -247,7 +224,7 @@ public:
 
     bool guiSetParent(const clap_window_t* window) {
         if (!window || !m_gui) return false;
-        return m_gui->create((HWND)window->win32, 340, 200);
+        return m_gui->create((HWND)window->win32, 360, 240);
     }
 
     bool guiSetVisible(bool visible) {
@@ -259,8 +236,8 @@ public:
     }
 
     bool guiGetSize(uint32_t* width, uint32_t* height) {
-        *width = 340;
-        *height = 200;
+        *width = 360;
+        *height = 240;
         return true;
     }
 
@@ -278,7 +255,8 @@ private:
 
     std::atomic<PluginState> m_state{ PluginState::IDLE };
     std::atomic<bool> m_recording{ false };
-    double m_recordStartBeat = 0.0;
+    CaptureMode m_captureMode{ CaptureMode::BARS_8 };
+    float m_targetSeconds = 16.0f;
 
     std::vector<float> m_bufferL;
     std::vector<float> m_bufferR;

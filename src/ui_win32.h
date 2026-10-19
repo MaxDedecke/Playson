@@ -18,18 +18,16 @@ namespace playson {
 
 enum class PluginState {
     IDLE,
-    WAITING_FOR_LOOP_START,
     RECORDING,
     UPLOADING,
     SUCCESS
 };
 
 enum class CaptureMode {
-    LOOP_RANGE,
     BARS_4,
     BARS_8,
     BARS_16,
-    MANUAL
+    TIME_30S
 };
 
 class Win32Gui {
@@ -42,7 +40,9 @@ public:
     void setVisible(bool visible);
 
     void setStatus(PluginState state, const std::string& message);
-    void setRecordedSeconds(float seconds);
+    void setProgress(float progress, float currentSec, float targetSec);
+    void setMode(CaptureMode mode) { m_mode = mode; }
+    CaptureMode getMode() const { return m_mode; }
 
     // Callbacks
     std::function<void()> onTriggerBounce;
@@ -56,15 +56,22 @@ private:
 
     HWND m_parent = NULL;
     HWND m_hwnd = NULL;
-    uint32_t m_width = 340;
-    uint32_t m_height = 240;
+    uint32_t m_width = 360;
+    uint32_t m_height = 250;
 
     PluginState m_state = PluginState::IDLE;
-    CaptureMode m_mode = CaptureMode::LOOP_RANGE;
+    CaptureMode m_mode = CaptureMode::BARS_8;
     std::string m_statusMessage = "Bereit zum Abspielen auf Sonos";
+
+    float m_progress = 0.0f;
     float m_recordedSeconds = 0.0f;
+    float m_targetSeconds = 16.0f;
+    float m_animPhase = 0.0f;
+    uint32_t m_successCountdown = 0;
+
     bool m_btnHovered = false;
     bool m_btnPressed = false;
+    int m_hoveredPill = -1; // 0=4bars, 1=8bars, 2=16bars, 3=30s
 };
 
 } // namespace playson
