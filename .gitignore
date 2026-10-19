@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+bin/
+*.obj
+*.o
+*.lib
+*.a
+*.exp
+*.ilk
+*.pdb
+*.clap
+*.dll
+
+# IDEs
+.vs/
+.vscode/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+.idea/
+CMakeSettings.json
+
+# OS
+Thumbs.db
+Desktop.ini
