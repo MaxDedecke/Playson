@@ -1,6 +1,7 @@
 #include "ui_win32.h"
-#include <windowsx.h>
+#include <objidl.h>
 #include <gdiplus.h>
+#include <windowsx.h>
 #include <sstream>
 #include <iomanip>
 

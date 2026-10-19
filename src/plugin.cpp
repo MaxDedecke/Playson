@@ -1,6 +1,3 @@
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -123,10 +120,10 @@ public:
             if (t->flags & CLAP_TRANSPORT_HAS_TEMPO) {
                 m_tempo = t->tempo;
             }
-            if (t->flags & CLAP_TRANSPORT_HAS_BEAT_TIMELINE) {
+            if (t->flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) {
                 currentBeat = (double)t->song_pos_beats / (double)CLAP_BEATTIME_FACTOR;
             }
-            if (t->flags & CLAP_TRANSPORT_HAS_LOOP_TIMELINE) {
+            if (t->flags & CLAP_TRANSPORT_IS_LOOP_ACTIVE) {
                 hasLoop = true;
                 loopStartBeat = (double)t->loop_start_beats / (double)CLAP_BEATTIME_FACTOR;
                 loopEndBeat = (double)t->loop_end_beats / (double)CLAP_BEATTIME_FACTOR;

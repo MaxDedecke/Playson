@@ -1,8 +1,5 @@
 #pragma once
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -51,8 +48,8 @@ public:
                                                    L"POST",
                                                    L"/api/upload",
                                                    NULL,
-                                                   WINHTTP_NO_REFERRER,
-                                                   WINHTTP_NO_ACCEPT_TYPES,
+                                                   NULL,
+                                                   NULL,
                                                    0);
             if (!hRequest) {
                 WinHttpCloseHandle(hConnect);

@@ -4,7 +4,7 @@ project(Playson VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_definitions(-DWIN32_LEAN_AND_MEAN -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS)
+add_definitions(-DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -D_HAS_STD_BYTE=0)
 
 include_directories(
     include
@@ -33,4 +33,5 @@ target_link_libraries(Playson PRIVATE
     gdiplus
     gdi32
     user32
+    ole32
 )
