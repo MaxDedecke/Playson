@@ -38,20 +38,20 @@ bool Win32Gui::create(HWND parent, uint32_t width, uint32_t height) {
     m_width = width;
     m_height = height;
 
-    HINSTANCE hInstance = GetModuleHandle(NULL);
+    HINSTANCE hInstance = GetModuleHandleW(NULL);
 
-    WNDCLASSEX wc = { 0 };
-    wc.cbSize = sizeof(WNDCLASSEX);
+    WNDCLASSEXW wc = { 0 };
+    wc.cbSize = sizeof(WNDCLASSEXW);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
     wc.hbrBackground = NULL;
     wc.lpszClassName = WINDOW_CLASS_NAME;
 
-    RegisterClassEx(&wc);
+    RegisterClassExW(&wc);
 
-    m_hwnd = CreateWindowEx(
+    m_hwnd = CreateWindowExW(
         0,
         WINDOW_CLASS_NAME,
         L"Playson Sonos Bridge",
@@ -171,7 +171,7 @@ LRESULT CALLBACK Win32Gui::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         }
 
         default:
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 }
 
